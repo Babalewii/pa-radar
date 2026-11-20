@@ -1,15 +1,7 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#020617">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
-<meta name="mobile-web-app-capable" content="yes">
-<title>Synthetic PA Radar</title>
-<style>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#020617">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"><meta name="mobile-web-app-capable" content="yes">
+<title>Synthetic PA Radar</title><style>
 *{box-sizing:border-box}
 body{margin:0;background:#020617;color:#f1f5f9;font-family:system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
 .wrap{max-width:560px;margin:0 auto;padding:12px}
@@ -29,17 +21,17 @@ h1{font-size:18px;margin:0}#status{font-size:12px;color:#94a3b8;text-align:right
 .lv b{display:block;color:#f1f5f9;font-size:12px}
 .meta{margin-top:6px;font-size:12px;color:#64748b;display:flex;justify-content:space-between}
 #empty{text-align:center;color:#64748b;margin-top:40px}.foot{margin-top:20px;font-size:11px;color:#475569;text-align:center}
+select{background:#1e293b;color:#f1f5f9;border:0;border-radius:10px;padding:8px;margin:0 8px 8px 0;font-size:14px}
+#chart{height:380px;border-radius:12px;overflow:hidden;margin-top:4px}table{width:100%;font-size:12px;border-collapse:collapse;margin-top:8px}td,th{padding:5px 4px;text-align:left;border-bottom:1px solid #1e293b}.card{cursor:pointer}
 </style>
-</head>
-<body>
-<div class="wrap">
-  <div class="top"><h1>Synthetic PA Radar</h1><div id="status">Starting...</div></div>
-  <div class="chips" id="stg"></div>
-  <div class="chips" id="cats"></div>
-  <div id="list"></div>
-  <div id="empty" hidden>No setups right now.</div>
-  <div class="foot">Not financial advice. Trading is risky. Rules are untested on history.</div>
-</div>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script></head>
+<body><div class="wrap">
+<div class="top"><h1>Synthetic PA Radar</h1><div id="status">Starting...</div></div>
+<div class="chips" id="tabs"></div>
+<div id="p-Scanner"><div class="chips" id="stg"></div><div class="chips" id="cats"></div><div id="list"></div><div id="empty" hidden>No setups right now.</div></div>
+<div id="p-Chart" hidden><select id="sym"></select><div class="chips" id="ctf"></div><div class="chips" id="lay"></div><div id="chart"></div><div class="meta" id="cinfo"></div></div>
+<div id="p-Backtest" hidden><select id="bsym"></select><button class="chip on" id="run">Run backtest</button><div id="bout"></div></div>
+<div class="foot">Not financial advice. Trading is risky.</div></div>
 <script>
 const V="Volatility",BC="Boom/Crash",SJ="Step/Jump";
 const ENDPOINTS=["wss://api.derivws.com/trading/v1/options/ws/public","wss://ws.derivws.com/websockets/v3?app_id=1089"];
@@ -107,27 +99,10 @@ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}const p=ws.pendi
 ws.onclose=()=>Object.values(ws.pending).forEach(p=>{clearTimeout(p.t);p.rej(new Error("closed"))});});}
 function request(ws,pl){return new Promise((res,rej)=>{const id=++rid,t=setTimeout(()=>{delete ws.pending[id];rej(new Error("timeout"))},TIMEOUT);
 ws.pending[id]={res,rej,t};ws.send(JSON.stringify({...pl,req_id:id}));});}
-async function getC(ws,sym,tf){const m=await request(ws,{ticks_history:sym,style:"candles",granularity:G[tf],count:N[tf],end:"latest"});
+async function getC(ws,sym,tf,cnt){const m=await request(ws,{ticks_history:sym,style:"candles",granularity:G[tf],count:cnt||N[tf],end:"latest"});
 if(!m.candles)throw new Error((m.error&&m.error.message)||"no data");return m.candles.map(x=>({o:+x.open,h:+x.high,l:+x.low,c:+x.close,t:x.epoch}));}
 async function trigger(ws,sym,dir){for(const tf of["M5","M1"]){await sleep(DELAY);const c=(await getC(ws,sym,tf)).slice(0,-1),st=structure(c,2),e=st.evs[st.evs.length-1];
 if(e&&e.dir===dir&&c.length-1-e.i<=3)return{tf,type:e.type};}return null;}
-
-// ===== UI =====
-const signals={},store={};let stg="ALL",cat="ALL",lastScan="";
-try{stg=localStorage.getItem("stg")||"ALL";cat=localStorage.getItem("cat")||"ALL";}catch(e){}
-const $=id=>document.getElementById(id),setStatus=t=>{$("status").textContent=t+(lastScan?" | "+lastScan:"");};
-const fx=x=>x.toFixed(x>1000?2:x>100?3:4),RK={TRIGGERED:0,ARMED:1,WATCHING:2};
-function chips(el,items,get,set){el.innerHTML="";items.forEach(v=>{const b=document.createElement("button");b.className="chip"+(get()===v?" on":"");b.textContent=v;
-b.onclick=()=>{set(v);try{localStorage.setItem("stg",stg);localStorage.setItem("cat",cat);}catch(e){}draw();};el.appendChild(b);});}
-function draw(){chips($("stg"),["ALL","TRIGGERED","ARMED","WATCHING"],()=>stg,v=>stg=v);chips($("cats"),["ALL",V,BC,SJ],()=>cat,v=>cat=v);
-const rows=Object.values(signals).filter(s=>(stg==="ALL"||s.stage===stg)&&(cat==="ALL"||s.cat===cat)).sort((a,b)=>RK[a.stage]-RK[b.stage]||b.sc-a.sc);
-$("list").innerHTML=rows.map(s=>`<div class="card"><div class="row"><div><span class="name">${s.name}</span><span class="tag t-${s.stage}">${s.stage}</span><span class="tag ${s.rev?"t-REV":"t-CON"}">${s.rev?"REVERSAL":"CONTINUATION"}</span></div>
-<span class="badge ${s.dir===1?"buy":"sell"}">${s.dir===1?"BUY":"SELL"}</span></div>
-<div class="pat">${s.z.kinds.join(" + ")} · M15 zone ${fx(s.z.lo)} – ${fx(s.z.hi)}${s.z.fresh?" · fresh":""}</div>
-<div class="pat">H4 ${s.dir===1?"bullish":"bearish"} (${s.h4.state.toLowerCase()}) · H1 ${s.pdOK?(s.dir===1?"discount ✓":"premium ✓"):"wrong side of 50%"}${s.tg?" · "+s.tg.tf+" "+s.tg.type:""}</div>
-<div class="lv"><div>Entry<b>${fx(s.entry)}</b></div><div>SL<b>${fx(s.sl)}</b></div><div>TP1<b>${fx(s.t1)}</b></div><div>TP2<b>${fx(s.t2)}</b></div></div>
-<div class="meta"><span>Score ${s.sc}/${s.tg?14:11} · RR ${(Math.abs(s.t1-s.entry)/Math.abs(s.entry-s.sl)).toFixed(1)}</span><span>${s.time}</span></div></div>`).join("");
-$("empty").hidden=rows.length>0;}
 
 // ===== SCAN LOOP =====
 async function scanOnce(ws){let ok=0;
@@ -138,13 +113,78 @@ if(!a)delete signals[sym];else{if(a.stage==="ARMED"){const tg=await trigger(ws,s
 a.name=WATCH[sym][0];a.cat=WATCH[sym][1];a.time=new Date().toISOString().slice(11,16)+" UTC";signals[sym]=a;}
 ok++;draw();setStatus("Scanning "+WATCH[sym][0]);}
 catch(e){if(e.message==="closed"||e.message==="timeout")throw e;}}return ok;}
-async function scanForever(){let ep=0;for(;;){let ws;try{setStatus("Connecting...");ws=await connect(ENDPOINTS[ep%ENDPOINTS.length]);
+async function scanForever(){let ep=0;for(;;){let ws;try{setStatus("Connecting...");ws=await connect(ENDPOINTS[ep%ENDPOINTS.length]);WS=ws;
 for(;;){const ok=await scanOnce(ws);lastScan=new Date().toISOString().slice(11,19)+" UTC";setStatus(ok?"Live ("+ok+" symbols)":"No data");if(!ok)throw new Error("no data");await sleep(PAUSE);}}
 catch(e){setStatus("Reconnecting: "+e.message);try{ws&&ws.close()}catch(x){}ep++;await sleep(3000);}}}
 async function wake(){try{await navigator.wakeLock.request("screen")}catch(e){}}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)wake()});
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
-wake();draw();scanForever();
-</script>
-</body>
-</html>
+// ===== UI =====
+const signals={},store={};let WS=null,stg="ALL",cat="ALL",tab="Scanner",ctf="M15",csym="R_75",lastScan="";
+const LAY={Zones:true,Swings:true,Structure:true,Fib:true,Setup:true},TABS=["Scanner","Chart","Backtest"];
+const $=id=>document.getElementById(id),setStatus=t=>{$("status").textContent=t+(lastScan?" | "+lastScan:"");};
+const fx=x=>x.toFixed(x>1000?2:x>100?3:4),RK={TRIGGERED:0,ARMED:1,WATCHING:2};
+function chips(el,items,on,click){el.innerHTML="";items.forEach(v=>{const b=document.createElement("button");b.className="chip"+(on(v)?" on":"");b.textContent=v;b.onclick=()=>click(v);el.appendChild(b);});}
+function render(){chips($("tabs"),TABS,v=>tab===v,v=>{tab=v;render();if(v==="Chart")loadChart();});TABS.forEach(t=>$("p-"+t).hidden=tab!==t);
+if(tab==="Chart"){chips($("ctf"),["M1","M5","M15","H1","H4"],v=>ctf===v,v=>{ctf=v;render();loadChart();});chips($("lay"),Object.keys(LAY),v=>LAY[v],v=>{LAY[v]=!LAY[v];render();loadChart();});}
+draw();}
+function openChart(s){csym=s;tab="Chart";render();loadChart();}
+function draw(){if(tab!=="Scanner")return;chips($("stg"),["ALL","TRIGGERED","ARMED","WATCHING"],v=>stg===v,v=>{stg=v;draw();});chips($("cats"),["ALL",V,BC,SJ],v=>cat===v,v=>{cat=v;draw();});
+const rows=Object.entries(signals).map(([sym,s])=>({sym,...s})).filter(s=>(stg==="ALL"||s.stage===stg)&&(cat==="ALL"||s.cat===cat)).sort((a,b)=>RK[a.stage]-RK[b.stage]||b.sc-a.sc);
+$("list").innerHTML=rows.map(s=>`<div class="card" onclick="openChart('${s.sym}')"><div class="row"><div><span class="name">${s.name}</span><span class="tag t-${s.stage}">${s.stage}</span><span class="tag ${s.rev?"t-REV":"t-CON"}">${s.rev?"REVERSAL":"CONTINUATION"}</span></div>
+<span class="badge ${s.dir===1?"buy":"sell"}">${s.dir===1?"BUY":"SELL"}</span></div>
+<div class="pat">${s.z.kinds.join(" + ")} · M15 zone ${fx(s.z.lo)} – ${fx(s.z.hi)}${s.z.fresh?" · fresh":""}</div>
+<div class="pat">H4 ${s.dir===1?"bullish":"bearish"} (${s.h4.state.toLowerCase()}) · H1 ${s.pdOK?(s.dir===1?"discount ✓":"premium ✓"):"wrong side of 50%"}${s.tg?" · "+s.tg.tf+" "+s.tg.type:""}</div>
+<div class="lv"><div>Entry<b>${fx(s.entry)}</b></div><div>SL<b>${fx(s.sl)}</b></div><div>TP1<b>${fx(s.t1)}</b></div><div>TP2<b>${fx(s.t2)}</b></div></div>
+<div class="meta"><span>Score ${s.sc}/${s.tg?14:11} · RR ${(Math.abs(s.t1-s.entry)/Math.abs(s.entry-s.sl)).toFixed(1)}</span><span>${s.time}</span></div></div>`).join("");
+$("empty").hidden=rows.length>0;}
+
+// ===== CHART =====
+let chart=null,cs=null,PL=[];
+async function loadChart(){if(tab!=="Chart")return;$("sym").value=csym;
+try{const raw=await getC(WS,csym,ctf,300);
+if(!chart){chart=LightweightCharts.createChart($("chart"),{height:380,layout:{background:{color:"#020617"},textColor:"#94a3b8"},grid:{vertLines:{color:"#0f172a"},horzLines:{color:"#0f172a"}},timeScale:{timeVisible:true,secondsVisible:false}});
+cs=chart.addCandlestickSeries({upColor:"#10b981",downColor:"#f43f5e",borderVisible:false,wickUpColor:"#10b981",wickDownColor:"#f43f5e"});}
+PL.forEach(l=>cs.removePriceLine(l));PL=[];
+cs.setData(raw.map(x=>({time:x.t,open:x.o,high:x.h,low:x.l,close:x.c})));
+const c=raw.slice(0,-1),st=structure(c,3),L=(p,col,t,ls)=>PL.push(cs.createPriceLine({price:p,color:col,lineWidth:1,lineStyle:ls,title:t,axisLabelVisible:false}));
+let nz=0;if(LAY.Zones)zonesOf(c,st).forEach(z=>{const col=z.dir===1?"#10b981":"#f43f5e";L(z.lo,col,z.kinds.join("+"),0);L(z.hi,col,"",0);nz++;});
+if(LAY.Swings){let h=0,l=0;for(let i=st.S.length-1;i>=0&&(h<2||l<2);i--){const s=st.S[i];if(s.t==="H"&&h<2){L(s.p,"#f59e0b","R",1);h++;}else if(s.t==="L"&&l<2){L(s.p,"#38bdf8","S",1);l++;}}}
+cs.setMarkers(LAY.Structure?st.evs.slice(-8).map(e=>({time:c[e.i].t,position:e.dir===1?"belowBar":"aboveBar",color:e.dir===1?"#10b981":"#f43f5e",shape:e.dir===1?"arrowUp":"arrowDown",text:e.type})):[]);
+if(LAY.Fib){const h1=(store[csym]&&store[csym].h1)||await getC(WS,csym,"H1"),pd=pdInfo(h1);if(pd){const R=pd.hi-pd.lo;L(pd.hi,"#a855f7","H1 hi",2);L(pd.lo,"#a855f7","H1 lo",2);L(pd.eq,"#e2e8f0","50%",2);L(pd.hi-.618*R,"#a855f7","f.618",1);L(pd.lo+.618*R,"#a855f7","f.618",1);}}
+const g=signals[csym];if(LAY.Setup&&g){L(g.entry,"#f1f5f9","Entry",0);L(g.sl,"#ef4444","SL",0);L(g.t1,"#22c55e","TP1",0);L(g.t2,"#22c55e","TP2",0);}
+$("cinfo").innerHTML=`<span>${WATCH[csym][0]} · ${ctf}</span><span>${nz} zones${g?" · "+g.stage+" "+(g.dir===1?"BUY":"SELL"):""}</span>`;
+}catch(e){$("cinfo").textContent="Chart: "+e.message+" (wait for connection)";}}
+setInterval(()=>{if(tab==="Chart")loadChart();},15000);
+
+// ===== BACKTEST (M15 replay, ARMED entries, TP1 vs SL) =====
+function stats(T){const n=T.length,w=T.filter(x=>x.r>0),gp=w.reduce((s,x)=>s+x.r,0),gl=-T.filter(x=>x.r<=0).reduce((s,x)=>s+x.r,0);let eq=0,pk=0,dd=0;const pts=[0];
+T.forEach(x=>{eq+=x.r;pts.push(eq);pk=Math.max(pk,eq);dd=Math.min(dd,eq-pk);});return{n,win:n?100*w.length/n:0,avg:n?eq/n:0,pf:gl?gp/gl:(gp?99:0),dd,pts,net:eq};}
+async function runBT(){const out=$("bout"),all=$("bsym").value==="ALL",syms=all?Object.keys(WATCH):[$("bsym").value],T=[];
+if(!WS){out.textContent="Not connected yet.";return;}
+for(const sym of syms){let m,h1,h4;try{out.textContent="Loading "+WATCH[sym][0]+"...";m=await getC(WS,sym,"M15",3000);await sleep(DELAY);h1=await getC(WS,sym,"H1",800);await sleep(DELAY);h4=await getC(WS,sym,"H4",300);await sleep(DELAY);}catch(e){continue;}
+out.textContent="Testing "+WATCH[sym][0]+"... ("+T.length+" trades)";let k4=0,k1=0,busy=-1;const seen={};
+for(let i=300;i<m.length-1;i++){if(i%40===0)await sleep(0);if(i<=busy)continue;const t=m[i].t;
+while(k4+1<h4.length&&h4[k4+1].t<=t)k4++;while(k1+1<h1.length&&h1[k1+1].t<=t)k1++;if(k4<12||k1<20)continue;
+let a;try{a=analyze({h4:h4.slice(Math.max(0,k4-79),k4+1),h1:h1.slice(Math.max(0,k1-149),k1+1)},m.slice(i-299,i+1));}catch(e){continue;}
+if(!a||a.stage!=="ARMED")continue;const key=a.z.lo+"|"+a.z.hi+"|"+a.dir;if(seen[key])continue;seen[key]=1;
+const risk=Math.abs(a.entry-a.sl),rr=Math.abs(a.t1-a.entry)/risk;let r=null,j=i+1;
+for(;j<m.length&&j<i+200;j++){const q=m[j];if(a.dir===1?q.l<=a.sl:q.h>=a.sl){r=-1;break;}if(a.dir===1?q.h>=a.t1:q.l<=a.t1){r=rr;break;}}
+if(r===null){j=Math.min(j,m.length-1);r=(m[j].c-a.entry)*a.dir/risk;}
+busy=j;T.push({t,r,label:a.z.kinds.join(" + "),rev:a.rev});}}
+if(!T.length){out.textContent="No trades found.";return;}
+T.sort((a,b)=>a.t-b.t);const s=stats(T),W=300,H=90,mn=Math.min(...s.pts),rg=(Math.max(...s.pts)-mn)||1;
+const pl=s.pts.map((v,i)=>(i/(s.pts.length-1||1)*W).toFixed(1)+","+(H-(v-mn)/rg*H).toFixed(1)).join(" "),grp={};
+T.forEach(x=>[x.label,x.rev?"REVERSAL":"CONTINUATION"].forEach(k=>(grp[k]=grp[k]||[]).push(x)));
+const rows=Object.entries(grp).sort((a,b)=>b[1].length-a[1].length).slice(0,12).map(([k,v])=>{const q=stats(v);return`<tr><td>${k}</td><td>${q.n}</td><td>${q.win.toFixed(0)}%</td><td>${q.avg.toFixed(2)}R</td></tr>`;}).join("");
+out.innerHTML=`<div class="lv"><div>Trades<b>${s.n}</b></div><div>Win rate<b>${s.win.toFixed(1)}%</b></div><div>Avg R<b>${s.avg.toFixed(2)}</b></div><div>Profit factor<b>${s.pf.toFixed(2)}</b></div></div>
+<div class="lv"><div>Net R<b>${s.net.toFixed(1)}</b></div><div>Max DD<b>${s.dd.toFixed(1)}R</b></div></div>
+<svg viewBox="0 0 ${W} ${H}" style="width:100%;margin-top:8px;background:#0f172a;border-radius:10px"><polyline fill="none" stroke="#38bdf8" stroke-width="1.5" points="${pl}"/></svg>
+<table><tr><th>Setup</th><th>N</th><th>Win</th><th>Avg R</th></tr>${rows}</table>
+<div class="foot">Replays about 30 days of M15 history. Entry when price is inside a zone on the correct H1 side (no M1/M5 trigger). TP1 vs SL, SL wins if both hit in one candle, one trade at a time per symbol. Past results do not predict future results.</div>`;}
+$("run").onclick=runBT;
+const opts=Object.keys(WATCH).map(s=>`<option value="${s}">${WATCH[s][0]}</option>`).join("");
+$("sym").innerHTML=opts;$("bsym").innerHTML='<option value="ALL">All symbols (slow)</option>'+opts;$("sym").value=csym;$("sym").onchange=e=>{csym=e.target.value;loadChart();};
+
+wake();render();scanForever();
+</script></body></html>
